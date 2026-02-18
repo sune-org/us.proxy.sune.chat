@@ -114,18 +114,16 @@ function stop(r) {
   flush(r, true)
   r.phase = 'done'
   r.error = null
-  const duration = ((Date.now() - r.startedAt) / 1000).toFixed(1)
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'done' })
-  notify(`Run ${r.rid} ended. Duration: ${duration}s`, 3, ['stop_sign'])
+  notify(`Run ${r.rid} ended.`, 3, ['stop_sign'])
 }
 
 function fail(r, message) {
   if (r.phase !== 'running') return
   clearTimeoutTimer(r)
   const err = String(message || 'stream_failed')
-  const duration = ((Date.now() - r.startedAt) / 1000).toFixed(1)
   queueDelta(r, `\n\nRun failed: ${err}`)
   flush(r, true)
   r.phase = 'error'
@@ -133,7 +131,7 @@ function fail(r, message) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'err', message: r.error })
-  notify(`Run ${r.rid} failed after ${duration}s: ${r.error}`, 3, ['rotating_light'])
+  notify(`Run ${r.rid} failed: ${r.error}`, 3, ['rotating_light'])
 }
 
 function sanitizeMessages(messages) {
@@ -269,3 +267,4 @@ export function handlePoll(uid) {
     images,
   }
 }
+
