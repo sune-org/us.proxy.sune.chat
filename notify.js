@@ -6,9 +6,10 @@ export function notify(msg, priority = 3, tags = []) {
     method: 'POST',
     body: msg,
     headers: {
-      Title: 'us.proxy.sune.chat',
+      Title: 'Sune Proxy',
       Priority: `${priority}`,
       Tags: tags.join(','),
     },
   }).catch(e => console.error('ntfy failed:', e))
 }
+
