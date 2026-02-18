@@ -6,7 +6,7 @@ export function notify(msg, priority = 3, tags = []) {
     method: 'POST',
     body: msg,
     headers: {
-      Title: 'Sune Proxy',
+      Title: 'us.proxy.sune.chat',
       Priority: `${priority}`,
       Tags: tags.join(','),
     },
