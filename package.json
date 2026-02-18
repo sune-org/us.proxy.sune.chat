@@ -1,0 +1,14 @@
+{
+  "name": "us-proxy-sune-chat",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "bun run index.js",
+    "dev": "bun --watch index.js"
+  },
+  "dependencies": {
+    "openai": "6.1.*",
+    "@anthropic-ai/sdk": "0.65.*"
+  }
+}
