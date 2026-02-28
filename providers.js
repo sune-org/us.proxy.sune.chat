@@ -129,12 +129,15 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
 
 export async function streamClaude({ apiKey, body, signal, onDelta, isRunning }) {
   const client = new Anthropic({ apiKey })
+  const online = (body.model ?? '').endsWith(':online')
+  const model = online ? body.model.slice(0, -7) : body.model
+
   const system = body.messages
     .filter(m => m.role === 'system')
     .map(extractText)
     .join('\n\n') || body.system
   const payload = {
-    model: body.model,
+    model,
     messages: body.messages.filter(m => m.role !== 'system').map(m => ({
       role: m.role,
       content: typeof m.content === 'string' ? m.content : (m.content || []).map(p => {
@@ -156,6 +159,12 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
       enabled: true,
       ...(body.reasoning.budget && { max_thinking_tokens: body.reasoning.budget }),
     }
+  }
+  if (online) {
+    payload.tools = [
+      ...(payload.tools || []),
+      { type: 'web_search_20260209', name: 'web_search' },
+    ]
   }
 
   const stream = client.messages.stream(payload)
