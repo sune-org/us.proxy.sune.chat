@@ -105,8 +105,11 @@ export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunnin
 
 export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning }) {
   const client = new OpenAI({ apiKey })
+  const online = (body.model ?? '').endsWith(':online')
+  const model = online ? body.model.slice(0, -7) : body.model
+
   const params = {
-    model: body.model,
+    model,
     input: buildInputForResponses(body.messages || []),
     temperature: body.temperature,
     stream: true,
@@ -115,6 +118,13 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
   if (Number.isFinite(+body.top_p)) params.top_p = +body.top_p
   if (body.reasoning?.effort) params.reasoning = { effort: body.reasoning.effort }
   if (body.verbosity) params.text = { verbosity: body.verbosity }
+
+  if (online) {
+    params.tools = [
+      ...(params.tools || []),
+      { type: 'web_search', external_web_access: true },
+    ]
+  }
 
   const stream = await client.responses.stream(params)
   try {
@@ -243,4 +253,3 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
     buf = buf.slice(buf.lastIndexOf('\n') + 1)
   }
 }
-
