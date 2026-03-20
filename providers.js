@@ -57,6 +57,77 @@ function mapToGoogleContents(messages) {
   return contents
 }
 
+function isOnlineModel(model) {
+  return String(model ?? '').endsWith(':online')
+}
+
+function stripOnlineSuffix(model) {
+  return String(model ?? '').replace(/:online$/, '')
+}
+
+function buildOpenAIWebSearchTool(body) {
+  if (!isOnlineModel(body?.model)) return null
+
+  const cfg = body?.web_search || {}
+  const tool = {
+    type: 'web_search',
+    external_web_access: true,
+  }
+
+  const allowedDomains = Array.isArray(cfg.allowed_domains)
+    ? cfg.allowed_domains
+      .map(d => String(d || '').trim().replace(/^https?:\/\//, '').replace(/\/+$/, ''))
+      .filter(Boolean)
+      .slice(0, 100)
+    : []
+  if (allowedDomains.length) tool.filters = { allowed_domains: allowedDomains }
+
+  if (cfg.user_location && typeof cfg.user_location === 'object') {
+    const u = cfg.user_location
+    const loc = { type: 'approximate' }
+    if (u.country) loc.country = String(u.country).slice(0, 2).toUpperCase()
+    if (u.city) loc.city = String(u.city)
+    if (u.region) loc.region = String(u.region)
+    if (u.timezone) loc.timezone = String(u.timezone)
+    if (loc.country || loc.city || loc.region || loc.timezone) tool.user_location = loc
+  } else if (cfg.use_default_location !== false) {
+    tool.user_location = {
+      type: 'approximate',
+      country: 'US',
+      timezone: 'America/Los_Angeles',
+    }
+  }
+
+  return tool
+}
+
+function collectOpenAISources(finalResponse) {
+  const out = []
+  const seen = new Set()
+  const add = (url, title) => {
+    const u = String(url || '').trim()
+    if (!u || seen.has(u)) return
+    seen.add(u)
+    out.push({ url: u, title: String(title || '') })
+  }
+
+  for (const item of finalResponse?.output || []) {
+    if (item?.type === 'message') {
+      for (const c of item.content || []) {
+        for (const a of c?.annotations || []) {
+          if (a?.type === 'url_citation' && a?.url) add(a.url, a.title)
+        }
+      }
+    }
+    const sources = item?.action?.sources
+    if (Array.isArray(sources)) {
+      for (const s of sources) add(s?.url || s?.link, s?.title || s?.name)
+    }
+  }
+
+  return out
+}
+
 export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunning }) {
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -105,25 +176,55 @@ export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunnin
 
 export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning }) {
   const client = new OpenAI({ apiKey })
+  const online = isOnlineModel(body.model)
+  const model = stripOnlineSuffix(body.model)
+
   const params = {
-    model: body.model,
+    model,
     input: buildInputForResponses(body.messages || []),
     temperature: body.temperature,
     stream: true,
   }
+
   if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) params.max_output_tokens = +body.max_tokens
   if (Number.isFinite(+body.top_p)) params.top_p = +body.top_p
   if (body.reasoning?.effort) params.reasoning = { effort: body.reasoning.effort }
   if (body.verbosity) params.text = { verbosity: body.verbosity }
 
+  if (online) {
+    const webSearchTool = buildOpenAIWebSearchTool(body)
+    if (webSearchTool) {
+      params.tools = [...(Array.isArray(body.tools) ? body.tools : []), webSearchTool]
+      params.tool_choice = body.tool_choice || 'auto'
+      params.include = [...new Set([...(Array.isArray(body.include) ? body.include : []), 'web_search_call.action.sources'])]
+
+      if (!params.reasoning && /^(gpt-5|o3|o4)/i.test(model)) {
+        // Keeps agentic search enabled on reasoning-capable models.
+        params.reasoning = { effort: 'medium' }
+      }
+    }
+  }
+
   const stream = await client.responses.stream(params)
+
   try {
     for await (const event of stream) {
       if (!isRunning()) break
       if (event.type.endsWith('.delta') && event.delta) onDelta(event.delta)
     }
+
+    if (online && isRunning()) {
+      let finalResponse = null
+      try { finalResponse = await stream.finalResponse() } catch {}
+      const sources = collectOpenAISources(finalResponse).slice(0, 12)
+      if (sources.length) {
+        const lines = sources.map((s, i) => `- [${s.title || `Source ${i + 1}`}](${s.url})`)
+        onDelta(`\n\nSources:\n${lines.join('\n')}`)
+      }
+    }
   } finally {
     try { stream.controller?.abort() } catch {}
+    try { signal?.aborted || (signal && signal.addEventListener && signal.addEventListener('abort', () => stream.controller?.abort(), { once: true })) } catch {}
   }
 }
 
