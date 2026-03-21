@@ -5,21 +5,22 @@ function extractText(m) {
   if (!m) return ''
   if (typeof m.content === 'string') return m.content
   if (!Array.isArray(m.content)) return ''
-  return m.content.filter(p => p && ['text', 'input_text'].includes(p.type)).map(p => p.text ?? p.content ?? '').join('')
+  return m.content.filter(p => p && ['text', 'input_text', 'output_text'].includes(p.type)).map(p => p.text ?? p.content ?? '').join('')
 }
 
 function isMultimodal(m) {
-  return m && Array.isArray(m.content) && m.content.some(p => p?.type && p.type !== 'text' && p.type !== 'input_text')
+  return m && Array.isArray(m.content) && m.content.some(p => p?.type && !['text', 'input_text', 'output_text'].includes(p.type))
 }
 
-function mapPartToResponses(part) {
+function mapPartToResponses(part, role) {
   const type = part?.type || 'text'
   if (['image_url', 'input_image'].includes(type)) {
     const url = part?.image_url?.url || part?.image_url
     return url ? { type: 'input_image', image_url: String(url) } : null
   }
-  if (['text', 'input_text'].includes(type)) return { type: 'input_text', text: String(part.text ?? part.content ?? '') }
-  return { type: 'input_text', text: `[${type}:${part?.file?.filename || 'file'}]` }
+  const textType = role === 'assistant' ? 'output_text' : 'input_text'
+  if (['text', 'input_text', 'output_text'].includes(type)) return { type: textType, text: String(part.text ?? part.content ?? '') }
+  return { type: textType, text: `[${type}:${part?.file?.filename || 'file'}]` }
 }
 
 function buildInputForResponses(messages) {
@@ -31,8 +32,8 @@ function buildInputForResponses(messages) {
   return messages.map(m => ({
     role: m.role,
     content: Array.isArray(m.content)
-      ? m.content.map(mapPartToResponses).filter(Boolean)
-      : [{ type: 'input_text', text: String(m.content || '') }],
+      ? m.content.map(p => mapPartToResponses(p, m.role)).filter(Boolean)
+      : [{ type: m.role === 'assistant' ? 'output_text' : 'input_text', text: String(m.content || '') }],
   }))
 }
 
