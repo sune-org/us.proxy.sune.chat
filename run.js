@@ -4,7 +4,7 @@ import { streamOpenRouter, streamOpenAI, streamClaude, streamGoogle } from './pr
 
 const BATCH_MS = 800
 const BATCH_BYTES = 3400
-const MAX_RUN_MS = 9 * 60 * 1000
+const MAX_RUN_MS = 12 * 60 * 1000
 const CLEANUP_INTERVAL_MS = 60_000
 
 const runs = new Map()
