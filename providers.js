@@ -143,6 +143,10 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   const online = (body.model ?? '').endsWith(':online')
   const model = online ? body.model.slice(0, -7) : body.model
 
+  const includeThoughts = body.reasoning?.exclude !== true
+  const effort = body.reasoning?.effort
+  const useAdaptive = effort && effort !== 'default'
+
   const system = body.messages
     .filter(m => m.role === 'system')
     .map(extractText)
@@ -161,16 +165,19 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
       }).filter(Boolean),
     })).filter(m => m.content.length),
     max_tokens: body.max_tokens || 64000,
+    stream: true,
   }
+
+  if (useAdaptive) {
+    payload.thinking = { type: 'adaptive' }
+    if (!includeThoughts) payload.thinking.display = 'omitted'
+    payload.output_config = { effort }
+  }
+
   if (system) payload.system = system
   if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
   if (Number.isFinite(+body.top_p)) payload.top_p = +body.top_p
-  if (body.reasoning?.enabled) {
-    payload.extended_thinking = {
-      enabled: true,
-      ...(body.reasoning.budget && { max_thinking_tokens: body.reasoning.budget }),
-    }
-  }
+
   if (online) {
     payload.tools = [
       ...(payload.tools || []),
@@ -178,9 +185,54 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
     ]
   }
 
-  const stream = client.messages.stream(payload)
-  stream.on('text', text => { if (isRunning()) onDelta(text) })
-  await stream.finalMessage()
+  const resp = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(payload),
+    signal,
+  })
+  if (!resp.ok) throw new Error(`Claude API error: ${resp.status} ${await resp.text()}`)
+
+  const reader = resp.body.getReader()
+  const dec = new TextDecoder()
+  let buf = '', hasThinking = false, hasContent = false
+
+  while (isRunning()) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buf += dec.decode(value, { stream: true })
+    const lines = buf.split('\n')
+    buf = lines.pop()
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue
+      const data = line.substring(6).trim()
+      if (!data) continue
+      try {
+        const event = JSON.parse(data)
+        if (event.type === 'content_block_delta') {
+          const delta = event.delta
+          if (delta?.type === 'thinking_delta' && delta.thinking && includeThoughts) {
+            onDelta(delta.thinking)
+            hasThinking = true
+          } else if (delta?.type === 'text_delta' && delta.text) {
+            if (hasThinking && !hasContent) onDelta('\n')
+            onDelta(delta.text)
+            hasContent = true
+          }
+        } else if (event.type === 'message_delta' && event.delta?.stop_reason) {
+          break
+        } else if (event.type === 'error') {
+          throw new Error(event.error?.message || 'Claude stream error')
+        }
+      } catch (e) {
+        if (e.message?.includes('Claude')) throw e
+      }
+    }
+  }
 }
 
 export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning }) {
