@@ -142,6 +142,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   const client = new Anthropic({ apiKey })
   const online = (body.model ?? '').endsWith(':online')
   const model = online ? body.model.slice(0, -7) : body.model
+  const CLAUDE_MAX_TOKENS = 128000
 
   const system = body.messages
     .filter(m => m.role === 'system')
@@ -160,7 +161,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
         return null
       }).filter(Boolean),
     })).filter(m => m.content.length),
-    max_tokens: body.max_tokens || 64000,
+    max_tokens: CLAUDE_MAX_TOKENS,
   }
   if (system) payload.system = system
   if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
