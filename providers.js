@@ -163,14 +163,13 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
     max_tokens: body.max_tokens || 64000,
   }
   if (system) payload.system = system
+  if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
+  if (Number.isFinite(+body.top_p)) payload.top_p = +body.top_p
 
   const effort = body.reasoning?.effort
   if (effort && effort !== 'default') {
     payload.thinking = { type: 'adaptive' }
     payload.output_config = { effort }
-  } else {
-    if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
-    if (Number.isFinite(+body.top_p)) payload.top_p = +body.top_p
   }
 
   if (online) {
