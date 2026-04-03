@@ -118,7 +118,7 @@ function stop(r) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'done' })
-  notify(`Run ${r.rid} ended. Duration: ${duration}s`, 3, ['stop_sign'])
+  notify(`Run ${r.rid} ended. Duration: ${duration}s`, 2, ['stop_sign'])
 }
 
 function fail(r, message) {
