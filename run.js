@@ -26,6 +26,8 @@ function meta(rid) {
     controller: null,
     startedAt: snap.startedAt ?? 0,
     timeoutTimer: null,
+    provider: snap.provider ?? null,
+    model: snap.model ?? null,
   }
   runs.set(rid, r)
   return r
@@ -46,6 +48,8 @@ function ensure(rid) {
     controller: null,
     startedAt: 0,
     timeoutTimer: null,
+    provider: null,
+    model: null,
   }
   runs.set(rid, r)
   return r
@@ -58,7 +62,13 @@ function saveSnapshot(r) {
     phase: r.phase,
     error: r.error,
     startedAt: r.startedAt,
+    provider: r.provider,
+    model: r.model,
   })
+}
+
+function tag(r) {
+  return `[${r.provider || '?'}/${r.model || '?'}]`
 }
 
 function send(ws, obj) {
@@ -118,7 +128,7 @@ function stop(r) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'done' })
-  notify(`Run ${r.rid} ended. Duration: ${duration}s`, 2, ['stop_sign'])
+  notify(`Run ${r.rid} ${tag(r)} ended. Duration: ${duration}s`, 2, ['stop_sign'])
 }
 
 function fail(r, message) {
@@ -133,7 +143,7 @@ function fail(r, message) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'err', message: r.error })
-  notify(`Run ${r.rid} failed after ${duration}s: ${r.error}`, 3, ['rotating_light'])
+  notify(`Run ${r.rid} ${tag(r)} failed after ${duration}s: ${r.error}`, 2, ['rotating_light'])
 }
 
 function sanitizeMessages(messages) {
@@ -232,6 +242,7 @@ export function handleMessage(rid, ws, msg) {
     return
   }
 
+  const resolvedProvider = provider || 'openrouter'
   r.rid = msgRid
   r.seq = -1
   r.phase = 'running'
@@ -240,6 +251,8 @@ export function handleMessage(rid, ws, msg) {
   r.pendingImages = []
   r.controller = new AbortController()
   r.startedAt = Date.now()
+  r.provider = resolvedProvider
+  r.model = body.model || null
 
   // Hard timeout safety net
   r.timeoutTimer = setTimeout(() => {
@@ -248,7 +261,7 @@ export function handleMessage(rid, ws, msg) {
 
   kv.set(`prompt:${r.rid}`, body.messages)
   saveSnapshot(r)
-  beginStream(r, { apiKey, body, provider: provider || 'openrouter' })
+  beginStream(r, { apiKey, body, provider: resolvedProvider })
 }
 
 export function handlePoll(uid) {
