@@ -207,7 +207,7 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
   const generationConfig = Object.entries({
     temperature: body.temperature,
     topP: body.top_p,
-    maxOutputTokens: body.max_tokens,
+    maxOutputTokens: 65536,
   }).reduce((acc, [k, v]) => (Number.isFinite(+v) && +v >= 0 ? { ...acc, [k]: +v } : acc), {})
 
   if (body.reasoning) {
