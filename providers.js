@@ -233,7 +233,7 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
   const payload = {
     contents: mapToGoogleContents(body.messages),
     ...(Object.keys(generationConfig).length && { generationConfig }),
-    ...((body.model ?? '').endsWith(':online') && { tools: [{ google_search: {} }] }),
+    ...((body.model ?? '').endsWith(':online') && { tools: [{ google_search: {} }, { url_context: {} }] }),
   }
 
   const resp = await fetch(
