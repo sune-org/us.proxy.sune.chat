@@ -158,6 +158,17 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
           const match = String(p.image_url?.url || p.image_url || '').match(/^data:(image\/\w+);base64,(.*)$/)
           if (match) return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } }
         }
+        if (p.type === 'document' && p.source) return p
+        if (p.type === 'file' && p.file?.file_data) {
+          return {
+            type: 'document',
+            source: {
+              type: 'base64',
+              media_type: 'application/pdf',
+              data: p.file.file_data,
+            },
+          }
+        }
         return null
       }).filter(Boolean),
     })).filter(m => m.content.length),
