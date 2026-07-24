@@ -179,7 +179,9 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   if (Number.isFinite(+body.top_p)) payload.top_p = +body.top_p
 
   const effort = body.reasoning?.effort
-  if (effort && effort !== 'default') {
+  if (effort === 'none') {
+    payload.thinking = { type: 'disabled' }
+  } else if (effort && effort !== 'default') {
     payload.thinking = { type: 'adaptive' }
     payload.output_config = { effort }
   }
@@ -222,9 +224,11 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
   }).reduce((acc, [k, v]) => (Number.isFinite(+v) && +v >= 0 ? { ...acc, [k]: +v } : acc), {})
 
   if (body.reasoning) {
+    const effort = body.reasoning.effort
+    const thinkingLevel = effort === 'none' ? 'minimal' : (effort && effort !== 'default' ? effort : undefined)
     generationConfig.thinkingConfig = {
       includeThoughts: body.reasoning.exclude !== true,
-      ...(body.reasoning.effort && body.reasoning.effort !== 'default' && { thinkingLevel: body.reasoning.effort }),
+      ...(thinkingLevel && { thinkingLevel }),
     }
   }
   if (body.response_format?.type?.startsWith('json')) {
