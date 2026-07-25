@@ -189,7 +189,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   if (online) {
     payload.tools = [
       ...(payload.tools || []),
-      { type: 'web_search_20250305', name: 'web_search' },
+      { type: 'web_search_20260318', name: 'web_search', allowed_callers: ['direct'] },
     ]
   }
 
