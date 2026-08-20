@@ -258,6 +258,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
 
   const includeThoughts = body.reasoning?.exclude !== true
   let hasThinking = false, hasContent = false
+  const sources = new Set()
 
   const stream = client.messages.stream(payload)
   try {
@@ -272,10 +273,18 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
         if (hasThinking && !hasContent) onDelta('\n')
         onDelta(delta.text)
         hasContent = true
+      } else if (delta.type === 'citations_delta' && delta.citation) {
+        const uri = delta.citation.url || delta.citation.source
+        if (uri) sources.add(uri)
       }
     }
   } finally {
     try { stream.controller?.abort() } catch {}
+  }
+
+  if (sources.size && isRunning()) {
+    const list = [...sources].map((uri, i) => `${i + 1}. [${uri}](${uri})`).join('\n')
+    onDelta(`\n\n---\n\n**Sources**\n\n${list}\n`)
   }
 }
 
