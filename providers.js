@@ -1,5 +1,6 @@
 import OpenAI from 'openai'
 import Anthropic from '@anthropic-ai/sdk'
+import { GoogleGenAI } from '@google/genai'
 
 function extractText(m) {
   if (!m) return ''
@@ -37,26 +38,91 @@ function buildInputForResponses(messages) {
   }))
 }
 
-function mapToGoogleContents(messages) {
-  const contents = messages.reduce((acc, m) => {
-    const role = m.role === 'assistant' ? 'model' : 'user'
-    const msgContent = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]
-    const parts = msgContent.map(p => {
-      if (p.type === 'text') return { text: p.text || '' }
-      if (p.type === 'image_url' && p.image_url?.url) {
-        const match = p.image_url.url.match(/^data:(image\/\w+);base64,(.*)$/)
-        if (match) return { inline_data: { mime_type: match[1], data: match[2] } }
-      }
+/* ---------- Google helpers ---------- */
+
+const THINKING_LEVELS = { none: 'minimal', minimal: 'minimal', low: 'low', medium: 'medium', high: 'high' }
+
+const EXT_MIME = {
+  pdf: 'application/pdf', png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', webp: 'image/webp',
+  gif: 'image/gif', heic: 'image/heic', heif: 'image/heif', bmp: 'image/bmp',
+  mp3: 'audio/mp3', wav: 'audio/wav', ogg: 'audio/ogg', flac: 'audio/flac', aac: 'audio/aac', m4a: 'audio/mp4',
+  mp4: 'video/mp4', mov: 'video/quicktime', webm: 'video/webm',
+  txt: 'text/plain', md: 'text/md', csv: 'text/csv', xml: 'text/xml', rtf: 'text/rtf',
+}
+
+const mimeFromName = n => EXT_MIME[String(n || '').split('.').pop().toLowerCase()] || 'text/plain'
+
+const inlineFromDataUrl = u => {
+  const m = String(u || '').match(/^data:([^;,]+);base64,(.*)$/s)
+  return m ? { inlineData: { mimeType: m[1], data: m[2] } } : null
+}
+
+function mapPartToGoogle(p) {
+  if (!p) return null
+  if (typeof p === 'string') return p.trim() ? { text: p } : null
+  switch (p.type) {
+    case 'text':
+      return p.text?.trim() ? { text: p.text } : null
+    case 'image_url':
+      return inlineFromDataUrl(p.image_url?.url || p.image_url)
+    case 'input_audio':
+      return p.input_audio?.data
+        ? { inlineData: { mimeType: p.input_audio.format === 'mp3' ? 'audio/mp3' : 'audio/wav', data: p.input_audio.data } }
+        : null
+    case 'file': {
+      const d = p.file?.file_data
+      if (!d) return null
+      return d.startsWith('data:') ? inlineFromDataUrl(d) : { inlineData: { mimeType: mimeFromName(p.file.filename), data: d } }
+    }
+    default:
       return null
-    }).filter(Boolean)
-    if (!parts.length) return acc
-    if (acc.length > 0 && acc.at(-1).role === role) acc.at(-1).parts.push(...parts)
-    else acc.push({ role, parts })
-    return acc
-  }, [])
-  if (contents.at(-1)?.role !== 'user') contents.pop()
+  }
+}
+
+const isBlankTurn = c => c.parts.every(p => 'text' in p) && ['', '.'].includes(c.parts.map(p => p.text).join('').trim())
+
+function mapToGoogleContents(messages) {
+  const contents = []
+  for (const m of messages) {
+    if (!m || m.role === 'system') continue
+    const role = m.role === 'assistant' ? 'model' : 'user'
+    const src = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]
+    const parts = src.map(mapPartToGoogle).filter(Boolean)
+    for (const img of m.images || []) {
+      const ip = inlineFromDataUrl(img?.image_url?.url || img?.image_url)
+      if (ip) parts.push(ip)
+    }
+    if (!parts.length) continue
+    const last = contents.at(-1)
+    if (last?.role === role) last.parts.push(...parts)
+    else contents.push({ role, parts })
+  }
+  // Drop empty/placeholder trailing model turns (no prefill support needed here)
+  while (contents.length && contents.at(-1).role === 'model' && isBlankTurn(contents.at(-1))) contents.pop()
   return contents
 }
+
+function toGoogleSchema(s) {
+  if (typeof s !== 'object' || s === null) return s
+  const n = Array.isArray(s) ? [] : {}
+  for (const k in s) if (Object.hasOwn(s, k)) n[k] = (k === 'type' && typeof s[k] === 'string') ? s[k].toUpperCase() : toGoogleSchema(s[k])
+  return n
+}
+
+function collectSources(candidate, sources) {
+  for (const c of candidate?.groundingMetadata?.groundingChunks || []) {
+    const uri = c?.web?.uri
+    if (uri && !sources.has(uri)) sources.set(uri, c.web.title || new URL(uri).hostname)
+  }
+  for (const u of candidate?.urlContextMetadata?.urlMetadata || []) {
+    const uri = u?.retrievedUrl
+    if (!uri || sources.has(uri)) continue
+    if (u.urlRetrievalStatus && u.urlRetrievalStatus !== 'URL_RETRIEVAL_STATUS_SUCCESS') continue
+    try { sources.set(uri, new URL(uri).hostname) } catch { sources.set(uri, uri) }
+  }
+}
+
+/* ---------- Providers ---------- */
 
 export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunning }) {
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
@@ -217,75 +283,74 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
 }
 
 export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning }) {
-  const generationConfig = Object.entries({
-    temperature: body.temperature,
-    topP: body.top_p,
-    maxOutputTokens: 65536,
-  }).reduce((acc, [k, v]) => (Number.isFinite(+v) && +v >= 0 ? { ...acc, [k]: +v } : acc), {})
+  const ai = new GoogleGenAI({ apiKey })
+  const raw = body.model ?? ''
+  const online = raw.endsWith(':online')
+  const model = (online ? raw.slice(0, -7) : raw).replace(/^models\//, '')
 
+  const config = { abortSignal: signal }
+  if (Number.isFinite(+body.temperature)) config.temperature = +body.temperature
+  if (Number.isFinite(+body.top_p)) config.topP = +body.top_p
+  if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) config.maxOutputTokens = +body.max_tokens
+
+  const systemInstruction = body.messages.filter(m => m.role === 'system').map(extractText).filter(Boolean).join('\n\n')
+  if (systemInstruction) config.systemInstruction = systemInstruction
+
+  const includeThoughts = body.reasoning?.exclude !== true
   if (body.reasoning) {
-    const effort = body.reasoning.effort
-    const thinkingLevel = effort === 'none' ? 'minimal' : (effort && effort !== 'default' ? effort : undefined)
-    generationConfig.thinkingConfig = {
-      includeThoughts: body.reasoning.exclude !== true,
-      ...(thinkingLevel && { thinkingLevel }),
+    const level = THINKING_LEVELS[String(body.reasoning.effort || '').toLowerCase()]
+    config.thinkingConfig = { includeThoughts, ...(level && { thinkingLevel: level }) }
+  }
+
+  if (online) config.tools = [{ googleSearch: {} }, { urlContext: {} }]
+
+  if (body.modalities?.includes('image')) {
+    config.responseModalities = ['TEXT', 'IMAGE']
+    config.imageConfig = {
+      aspectRatio: body.image_config?.aspect_ratio || '1:1',
+      imageSize: body.image_config?.image_size || '1K',
     }
   }
+
   if (body.response_format?.type?.startsWith('json')) {
-    generationConfig.responseMimeType = 'application/json'
-    if (body.response_format.json_schema) {
-      const translate = s => {
-        if (typeof s !== 'object' || s === null) return s
-        const n = Array.isArray(s) ? [] : {}
-        for (const k in s) if (Object.hasOwn(s, k)) n[k] = (k === 'type' && typeof s[k] === 'string') ? s[k].toUpperCase() : translate(s[k])
-        return n
+    config.responseMimeType = 'application/json'
+    const schema = body.response_format.json_schema
+    if (schema) config.responseSchema = toGoogleSchema(schema.schema || schema)
+  }
+
+  const contents = mapToGoogleContents(body.messages)
+  if (!contents.length) throw new Error('Google API error: no usable content')
+
+  const sources = new Map()
+  let hasReasoning = false, hasContent = false
+
+  const stream = await ai.models.generateContentStream({ model, contents, config })
+
+  for await (const chunk of stream) {
+    if (!isRunning()) return
+    const candidate = chunk.candidates?.[0]
+    collectSources(candidate, sources)
+    for (const part of candidate?.content?.parts || []) {
+      const inline = part.inlineData
+      if (inline?.data && String(inline.mimeType || '').startsWith('image/')) {
+        onDelta('', [{ image_url: { url: `data:${inline.mimeType};base64,${inline.data}` } }])
+        continue
       }
-      generationConfig.responseSchema = translate(body.response_format.json_schema.schema || body.response_format.json_schema)
+      if (!part.text) continue
+      if (part.thought) {
+        if (!includeThoughts) continue
+        onDelta(part.text)
+        hasReasoning = true
+      } else {
+        if (hasReasoning && !hasContent) onDelta('\n')
+        onDelta(part.text)
+        hasContent = true
+      }
     }
   }
 
-  const model = (body.model ?? '').replace(/:online$/, '')
-  const payload = {
-    contents: mapToGoogleContents(body.messages),
-    ...(Object.keys(generationConfig).length && { generationConfig }),
-    ...((body.model ?? '').endsWith(':online') && { tools: [{ google_search: {} }, { url_context: {} }] }),
-  }
-
-  const resp = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-goog-api-key': apiKey },
-      body: JSON.stringify(payload),
-      signal,
-    }
-  )
-  if (!resp.ok) throw new Error(`Google API error: ${resp.status} ${await resp.text()}`)
-
-  const reader = resp.body.getReader()
-  const dec = new TextDecoder()
-  let buf = '', hasReasoning = false, hasContent = false
-
-  while (isRunning()) {
-    const { done, value } = await reader.read()
-    if (done) break
-    buf += dec.decode(value, { stream: true })
-    for (const line of buf.split('\n')) {
-      if (!line.startsWith('data: ')) continue
-      try {
-        JSON.parse(line.substring(6))?.candidates?.[0]?.content?.parts?.forEach(p => {
-          if (p.thought?.thought) {
-            onDelta(p.thought.thought)
-            hasReasoning = true
-          }
-          if (p.text) {
-            if (hasReasoning && !hasContent) onDelta('\n')
-            onDelta(p.text)
-            hasContent = true
-          }
-        })
-      } catch {}
-    }
-    buf = buf.slice(buf.lastIndexOf('\n') + 1)
+  if (sources.size && isRunning()) {
+    const list = [...sources].map(([uri, title], i) => `${i + 1}. [${title}](${uri})`).join('\n')
+    onDelta(`\n\n---\n\n**Sources**\n\n${list}\n`)
   }
 }
