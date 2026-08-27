@@ -111,11 +111,13 @@ function toGoogleSchema(s) {
 function collectSources(candidate, sources) {
   for (const c of candidate?.groundingMetadata?.groundingChunks || []) {
     const uri = c?.web?.uri
-    if (uri) sources.add(uri)
+    if (uri && !sources.has(uri)) sources.set(uri, c?.web?.title || uri)
   }
   for (const u of candidate?.urlContextMetadata?.urlMetadata || []) {
     const uri = u?.retrievedUrl
-    if (uri && (!u.urlRetrievalStatus || u.urlRetrievalStatus === 'URL_RETRIEVAL_STATUS_SUCCESS')) sources.add(uri)
+    if (uri && (!u.urlRetrievalStatus || u.urlRetrievalStatus === 'URL_RETRIEVAL_STATUS_SUCCESS') && !sources.has(uri)) {
+      sources.set(uri, u?.title || uri)
+    }
   }
 }
 
@@ -329,7 +331,7 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
   const contents = mapToGoogleContents(body.messages)
   if (!contents.length) throw new Error('Google API error: no usable content')
 
-  const sources = new Set()
+  const sources = new Map()
   let hasReasoning = false, hasContent = false
 
   const stream = await ai.models.generateContentStream({ model, contents, config })
@@ -358,7 +360,7 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
   }
 
   if (sources.size && isRunning()) {
-    const list = [...sources].map((uri, i) => `${i + 1}. [${uri}](${uri})`).join('\n')
+    const list = [...sources.entries()].map(([uri, title], i) => `${i + 1}. [${title}](${uri})`).join('\n')
     onDelta(`\n\n---\n\n**Sources**\n\n${list}\n`)
   }
 }
