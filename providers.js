@@ -238,6 +238,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
       }).filter(Boolean),
     })).filter(m => m.content.length),
     max_tokens: CLAUDE_MAX_TOKENS,
+    cache_control: { type: 'ephemeral' },
   }
   if (system) payload.system = system
   if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
