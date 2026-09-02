@@ -8,8 +8,8 @@
     "dev": "bun --watch index.js"
   },
   "dependencies": {
-    "openai": "6.34.*",
-    "@anthropic-ai/sdk": "0.91.*",
+    "openai": "7.9.*",
+    "@anthropic-ai/sdk": "0.123.*",
     "@google/genai": "2.*"
   }
 }
