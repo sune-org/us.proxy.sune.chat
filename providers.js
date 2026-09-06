@@ -124,6 +124,12 @@ function collectSources(candidate, sources) {
 /* ---------- Providers ---------- */
 
 export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunning }) {
+  const payload = { ...body }
+  if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) {
+    payload.max_tokens = +body.max_tokens
+  } else {
+    delete payload.max_tokens
+  }
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -132,7 +138,7 @@ export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunnin
       'HTTP-Referer': 'https://sune.chat',
       'X-Title': 'Sune',
     },
-    body: JSON.stringify(body),
+    body: JSON.stringify(payload),
     signal,
   })
   if (!resp.ok) throw new Error(`OpenRouter API error: ${resp.status} ${await resp.text()}`)
@@ -183,7 +189,6 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
   if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) params.max_output_tokens = +body.max_tokens
   if (Number.isFinite(+body.top_p)) params.top_p = +body.top_p
   if (body.reasoning?.effort) params.reasoning = { effort: body.reasoning.effort }
-  if (body.verbosity) params.text = { verbosity: body.verbosity }
 
   if (online) {
     params.tools = [
@@ -207,7 +212,6 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   const client = new Anthropic({ apiKey })
   const online = (body.model ?? '').endsWith(':online')
   const model = online ? body.model.slice(0, -7) : body.model
-  const CLAUDE_MAX_TOKENS = 128000
 
   const system = body.messages
     .filter(m => m.role === 'system')
@@ -237,9 +241,9 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
         return null
       }).filter(Boolean),
     })).filter(m => m.content.length),
-    max_tokens: CLAUDE_MAX_TOKENS,
     cache_control: { type: 'ephemeral' },
   }
+  if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) payload.max_tokens = +body.max_tokens
   if (system) payload.system = system
   if (Number.isFinite(+body.temperature)) payload.temperature = +body.temperature
   if (Number.isFinite(+body.top_p)) payload.top_p = +body.top_p
@@ -299,8 +303,8 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
 
   const config = {
     abortSignal: signal,
-    maxOutputTokens: Number.isFinite(+body.max_tokens) && +body.max_tokens > 0 ? +body.max_tokens : 65536,
   }
+  if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) config.maxOutputTokens = +body.max_tokens
   if (Number.isFinite(+body.temperature)) config.temperature = +body.temperature
   if (Number.isFinite(+body.top_p)) config.topP = +body.top_p
 
