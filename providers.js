@@ -130,6 +130,12 @@ export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunnin
   } else {
     delete payload.max_tokens
   }
+  if (payload.reasoning) {
+    payload.reasoning = { ...payload.reasoning }
+    if (!payload.reasoning.effort || payload.reasoning.effort === 'default') {
+      delete payload.reasoning.effort
+    }
+  }
   const resp = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
     headers: {
@@ -188,7 +194,7 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
   }
   if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) params.max_output_tokens = +body.max_tokens
   if (Number.isFinite(+body.top_p)) params.top_p = +body.top_p
-  if (body.reasoning?.effort) params.reasoning = { effort: body.reasoning.effort }
+  if (body.reasoning?.effort && body.reasoning.effort !== 'default') params.reasoning = { effort: body.reasoning.effort }
 
   if (online) {
     params.tools = [
@@ -313,7 +319,8 @@ export async function streamGoogle({ apiKey, body, signal, onDelta, isRunning })
 
   const includeThoughts = body.reasoning?.exclude !== true
   if (body.reasoning) {
-    const level = THINKING_LEVELS[String(body.reasoning.effort || '').toLowerCase()]
+    const effort = body.reasoning.effort
+    const level = (effort && effort !== 'default') ? THINKING_LEVELS[String(effort).toLowerCase()] : undefined
     config.thinkingConfig = { includeThoughts, ...(level && { thinkingLevel: level }) }
   }
 
