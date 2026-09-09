@@ -247,7 +247,6 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
         return null
       }).filter(Boolean),
     })).filter(m => m.content.length),
-    cache_control: { type: 'ephemeral' },
   }
   if (Number.isFinite(+body.max_tokens) && +body.max_tokens > 0) payload.max_tokens = +body.max_tokens
   if (system) payload.system = system
