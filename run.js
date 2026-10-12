@@ -67,22 +67,24 @@ function saveSnapshot(r) {
   })
 }
 
-function tag(r) {
-  return `[${r.provider || '?'}/${r.model || '?'}]`
-}
-
-// Non-empty generation settings for ntfy; prompts, model and request plumbing (incl. apiKey) are skipped
+// Non-empty generation settings for ntfy; prompts, model and request plumbing (incl. apiKey) are skipped,
+// as is Sune's default of hiding thoughts (reasoning.exclude=true)
 const NOT_SETTINGS = new Set(['messages', 'system', 'model', 'stream', 'apiKey', 'rid', 'type', 'after', 'provider', 'or_body'])
 
 function settingsOf(o, pre = '') {
   return Object.entries(o || {}).flatMap(([k, v]) => {
-    if ((!pre && NOT_SETTINGS.has(k)) || v == null || v === '' || (typeof v === 'object' && !Object.keys(v).length)) return []
-    if (typeof v === 'object' && !Array.isArray(v)) return settingsOf(v, `${pre}${k}.`)
-    return [`${pre}${k}=${String(v).slice(0, 80)}`]
+    const key = pre + k
+    if (NOT_SETTINGS.has(key) || (key === 'reasoning.exclude' && v === true)) return []
+    if (v == null || v === '' || (typeof v === 'object' && !Object.keys(v).length)) return []
+    if (typeof v === 'object' && !Array.isArray(v)) return settingsOf(v, `${key}.`)
+    return [`- ${key}: \`${String(v).slice(0, 80)}\``]
   })
 }
 
-const withSettings = (r, s) => r.settings ? `${s}\n${r.settings}` : s
+function report(r, head, tags, extra) {
+  const title = `**${head}** · \`${r.provider || '?'}/${r.model || '?'}\` · run \`${r.rid}\``
+  notify([title, extra, r.settings].filter(Boolean).join('\n\n'), 2, tags)
+}
 
 function send(ws, obj) {
   try { ws.send(JSON.stringify(obj)) } catch {}
@@ -141,7 +143,7 @@ function stop(r) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'done' })
-  notify(withSettings(r, `Run ${r.rid} ${tag(r)} ended. Duration: ${duration}s`), 2, ['stop_sign'])
+  report(r, `Ended after ${duration}s`, ['stop_sign'])
 }
 
 function fail(r, message) {
@@ -156,7 +158,7 @@ function fail(r, message) {
   try { r.controller?.abort() } catch {}
   saveSnapshot(r)
   bcast(r, { type: 'err', message: r.error })
-  notify(withSettings(r, `Run ${r.rid} ${tag(r)} failed after ${duration}s: ${r.error}`), 2, ['rotating_light'])
+  report(r, `Failed after ${duration}s`, ['rotating_light'], `\`\`\`\n${r.error}\n\`\`\``)
 }
 
 function sanitizeMessages(messages) {
@@ -266,7 +268,7 @@ export function handleMessage(rid, ws, msg) {
   r.startedAt = Date.now()
   r.provider = resolvedProvider
   r.model = body.model || null
-  r.settings = settingsOf(body).join(' · ')
+  r.settings = settingsOf(body).join('\n')
 
   // Hard timeout safety net
   r.timeoutTimer = setTimeout(() => {
