@@ -48,6 +48,8 @@ Bun.serve({
   },
 
   websocket: {
+    // Videos ride along as base64 in every request; Bun's 16 MB default fits only a handful
+    maxPayloadLength: 100 * 1024 * 1024,
     open(ws) {
       const { uid } = ws.data
       addSocket(uid, ws)

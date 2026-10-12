@@ -57,6 +57,10 @@ const inlineFromDataUrl = u => {
   return m ? { inlineData: { mimeType: m[1], data: m[2] } } : null
 }
 
+// Gemini samples video at 1 fps by default; media resolution stays at the default (70 tokens/frame)
+const VIDEO_FPS = 3
+const withVideoFps = p => p?.inlineData?.mimeType?.startsWith('video/') ? { ...p, videoMetadata: { fps: VIDEO_FPS } } : p
+
 function mapPartToGoogle(p) {
   if (!p) return null
   if (typeof p === 'string') return p.trim() ? { text: p } : null
@@ -65,6 +69,8 @@ function mapPartToGoogle(p) {
       return p.text?.trim() ? { text: p.text } : null
     case 'image_url':
       return inlineFromDataUrl(p.image_url?.url || p.image_url)
+    case 'video_url':
+      return inlineFromDataUrl(p.video_url?.url || p.video_url)
     case 'input_audio':
       return p.input_audio?.data
         ? { inlineData: { mimeType: p.input_audio.format === 'mp3' ? 'audio/mp3' : 'audio/wav', data: p.input_audio.data } }
@@ -87,7 +93,7 @@ function mapToGoogleContents(messages) {
     if (!m || m.role === 'system') continue
     const role = m.role === 'assistant' ? 'model' : 'user'
     const src = Array.isArray(m.content) ? m.content : [{ type: 'text', text: String(m.content ?? '') }]
-    const parts = src.map(mapPartToGoogle).filter(Boolean)
+    const parts = src.map(mapPartToGoogle).filter(Boolean).map(withVideoFps)
     for (const img of m.images || []) {
       const ip = inlineFromDataUrl(img?.image_url?.url || img?.image_url)
       if (ip) parts.push(ip)
