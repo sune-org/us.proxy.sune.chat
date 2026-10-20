@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import { notify } from './notify.js'
 import { streamOpenRouter, streamOpenAI, streamClaude, streamGoogle } from './providers.js'
 
@@ -9,9 +10,9 @@ const KEEP_MS = 90 * 60 * 1000
 
 const runs = new Map()
 
-// Run ids are the client's reply ids: a base36 ms timestamp, a dash, then 128 random bits as hex.
+// Run ids are the client's reply ids: 128 random bits as unpadded base64url.
 // Knowing one is what lets you resume or stop a run, so only that unguessable form is accepted.
-const RID = /^[0-9a-z]{1,12}-[0-9a-f]{32}$/
+const RID = /^[\w-]{22}$/
 
 const newRun = (rid, phase) => ({
   rid,
@@ -46,8 +47,8 @@ function settingsOf(o, pre = '') {
 }
 
 function report(r, head, tags, extra) {
-  // Only the timestamp half: the full id would let anyone reading the topic fetch the reply
-  const title = `**${head}** · \`${r.provider || '?'}/${r.model || '?'}\` · run \`${r.rid.split('-')[0]}\``
+  // A short hash, never the id: the id would let anyone reading the topic fetch the reply
+  const title = `**${head}** · \`${r.provider || '?'}/${r.model || '?'}\` · run \`${createHash('sha256').update(r.rid).digest('hex').slice(0, 8)}\``
   notify([title, extra, r.settings].filter(Boolean).join('\n\n'), 2, tags)
 }
 
