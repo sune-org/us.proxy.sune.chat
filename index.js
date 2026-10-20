@@ -23,10 +23,8 @@ Bun.serve({
 
     if (url.pathname !== '/ws') return json({ error: 'not found' }, 404)
 
-    const rid = (url.searchParams.get('rid') || '').slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '')
-    if (!rid) return json({ error: 'rid is required' }, 400)
-
-    if (server.upgrade(req, { data: { rid } })) return
+    // The run id travels inside each message, never in the URL, so it can't end up in access logs
+    if (server.upgrade(req, { data: {} })) return
 
     return json({ error: 'websocket required' }, 426)
   },

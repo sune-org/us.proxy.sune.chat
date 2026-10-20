@@ -9,6 +9,10 @@ const KEEP_MS = 90 * 60 * 1000
 
 const runs = new Map()
 
+// Run ids are the client's reply ids: a base36 ms timestamp, a dash, then 128 random bits as hex.
+// Knowing one is what lets you resume or stop a run, so only that unguessable form is accepted.
+const RID = /^[0-9a-z]{1,12}-[0-9a-f]{32}$/
+
 const newRun = (rid, phase) => ({
   rid,
   phase,
@@ -42,7 +46,8 @@ function settingsOf(o, pre = '') {
 }
 
 function report(r, head, tags, extra) {
-  const title = `**${head}** · \`${r.provider || '?'}/${r.model || '?'}\` · run \`${r.rid}\``
+  // Only the timestamp half: the full id would let anyone reading the topic fetch the reply
+  const title = `**${head}** · \`${r.provider || '?'}/${r.model || '?'}\` · run \`${r.rid.split('-')[0]}\``
   notify([title, extra, r.settings].filter(Boolean).join('\n\n'), 2, tags)
 }
 
@@ -100,6 +105,7 @@ function fail(r, message) {
 function attach(r, ws, after) {
   for (const d of r.deltas.slice(after + 1)) send(ws, d)
   if (r.phase === 'done') return send(ws, { type: 'done' })
+  ws.data.run?.sockets.delete(ws)
   r.sockets.add(ws)
   ws.data.run = r
 }
@@ -146,12 +152,13 @@ export function removeSocket(ws) {
 }
 
 export function handleMessage(ws, msg) {
-  const { rid } = ws.data
+  if (msg.type === 'ping') return send(ws, { type: 'pong' })
+  const { rid } = msg
+  if (typeof rid !== 'string' || !RID.test(rid)) return send(ws, { type: 'err', message: 'bad_rid' })
   let r = runs.get(rid)
   const after = Number.isInteger(msg.after) ? msg.after : -1
 
   switch (msg.type) {
-    case 'ping': return send(ws, { type: 'pong' })
     // An unknown rid gets a finished placeholder, so a begin still in flight on another socket can't start it
     case 'stop': return r ? stop(r) : void runs.set(rid, newRun(rid, 'done'))
     case 'resume': return r ? attach(r, ws, after) : send(ws, { type: 'gone' })
