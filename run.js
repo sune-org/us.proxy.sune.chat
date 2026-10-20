@@ -5,7 +5,7 @@ const BATCH_MS = 800
 const BATCH_BYTES = 3400
 const MAX_RUN_MS = 12 * 60 * 1000
 // How long a finished run stays resumable
-const KEEP_MS = 20 * 60 * 1000
+const KEEP_MS = 90 * 60 * 1000
 
 const runs = new Map()
 
