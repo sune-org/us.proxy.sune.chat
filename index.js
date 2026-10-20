@@ -1,70 +1,46 @@
-import { addSocket, removeSocket, handleMessage, handlePoll } from './run.js'
+import { handleMessage, removeSocket } from './run.js'
 
 const PORT = +(process.env.PORT || 8080)
 
 const ALLOWED_ORIGINS = ['sune.planetrenox.com', 'sune.chat']
 const isAllowed = origin => {
-  if (!origin) return false
   try {
     const h = new URL(origin).hostname
     return ALLOWED_ORIGINS.some(a => h === a || h.endsWith('.github.io'))
   } catch { return false }
 }
 
-const CORS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': 'GET, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-  'Access-Control-Max-Age': '86400',
-}
-
-const json = (data, status = 200) => new Response(JSON.stringify(data), {
-  status,
-  headers: { 'Content-Type': 'application/json', 'Cache-Control': 'no-store', ...CORS },
-})
+const json = (data, status) => Response.json(data, { status, headers: { 'Cache-Control': 'no-store' } })
 
 Bun.serve({
   port: PORT,
 
   fetch(req, server) {
     const url = new URL(req.url)
-    const method = req.method.toUpperCase()
-
-    if (method === 'OPTIONS') return new Response(null, { status: 204, headers: CORS })
 
     const origin = req.headers.get('Origin')
     if (origin && !isAllowed(origin)) return json({ error: 'Forbidden' }, 403)
 
     if (url.pathname !== '/ws') return json({ error: 'not found' }, 404)
 
-    const uid = (url.searchParams.get('uid') || '').slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '')
-    if (!uid) return json({ error: 'uid is required' }, 400)
+    const rid = (url.searchParams.get('rid') || '').slice(0, 64).replace(/[^a-zA-Z0-9_-]/g, '')
+    if (!rid) return json({ error: 'rid is required' }, 400)
 
-    if (server.upgrade(req, { data: { uid } })) return
+    if (server.upgrade(req, { data: { rid } })) return
 
-    if (method === 'GET') return json(handlePoll(uid))
-
-    return json({ error: 'method not allowed' }, 405)
+    return json({ error: 'websocket required' }, 426)
   },
 
   websocket: {
     // Videos ride along as base64 in every request; Bun's 16 MB default fits only a handful
     maxPayloadLength: 100 * 1024 * 1024,
-    open(ws) {
-      const { uid } = ws.data
-      addSocket(uid, ws)
-    },
     message(ws, raw) {
-      const { uid } = ws.data
       let msg
       try { msg = JSON.parse(String(raw)) }
       catch { try { ws.send(JSON.stringify({ type: 'err', message: 'bad_json' })) } catch {}; return }
-      handleMessage(uid, ws, msg)
+      handleMessage(ws, msg)
     },
-    close(ws) {
-      const { uid } = ws.data
-      removeSocket(uid, ws)
-    },
+    close: removeSocket,
   },
 })
 

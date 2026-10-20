@@ -169,20 +169,22 @@ export async function streamOpenRouter({ apiKey, body, signal, onDelta, isRunnin
       if (!line.startsWith('data: ')) continue
       const data = line.substring(6).trim()
       if (data === '[DONE]') return
-      try {
-        const delta = JSON.parse(data).choices?.[0]?.delta
-        if (!delta) continue
-        if (delta.reasoning && body.reasoning?.exclude !== true) {
-          onDelta(delta.reasoning)
-          hasReasoning = true
-        }
-        if (delta.content) {
-          if (hasReasoning && !hasContent) onDelta('\n')
-          onDelta(delta.content)
-          hasContent = true
-        }
-        if (delta.images) onDelta('', delta.images)
-      } catch {}
+      let chunk
+      try { chunk = JSON.parse(data) } catch { continue }
+      // Mid-stream failures arrive as a chunk with a top-level error
+      if (chunk.error) throw new Error(`OpenRouter error: ${chunk.error.message || JSON.stringify(chunk.error)}`)
+      const delta = chunk.choices?.[0]?.delta
+      if (!delta) continue
+      if (delta.reasoning && body.reasoning?.exclude !== true) {
+        onDelta(delta.reasoning)
+        hasReasoning = true
+      }
+      if (delta.content) {
+        if (hasReasoning && !hasContent) onDelta('\n')
+        onDelta(delta.content)
+        hasContent = true
+      }
+      if (delta.images) onDelta('', delta.images)
     }
   }
 }
@@ -209,7 +211,7 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
     ]
   }
 
-  const stream = await client.responses.stream(params)
+  const stream = client.responses.stream(params, { signal })
   try {
     for await (const event of stream) {
       if (!isRunning()) break
@@ -278,7 +280,7 @@ export async function streamClaude({ apiKey, body, signal, onDelta, isRunning })
   let hasThinking = false, hasContent = false
   const sources = new Set()
 
-  const stream = client.messages.stream(payload)
+  const stream = client.messages.stream(payload, { signal })
   try {
     for await (const event of stream) {
       if (!isRunning()) break
