@@ -10,6 +10,11 @@ const KEEP_MS = 90 * 60 * 1000
 
 const runs = new Map()
 
+// Stops for rids we haven't seen, so a begin still in flight on another socket can't start them.
+// Any socket can send these for free, so they're capped (oldest dropped first) instead of kept like runs
+const MAX_TOMBS = 10_000
+const tombs = new Map()
+
 // Run ids are the client's reply ids: 128 random bits as unpadded base64url.
 // Knowing one is what lets you resume or stop a run, so only that unguessable form is accepted.
 const RID = /^[\w-]{22}$/
@@ -146,7 +151,13 @@ async function beginStream(r, apiKey, body) {
 setInterval(() => {
   const now = Date.now()
   for (const [rid, r] of runs) if (r.phase === 'done' && now - r.endedAt > KEEP_MS) runs.delete(rid)
+  for (const [rid, t] of tombs) { if (now - t <= KEEP_MS) break; tombs.delete(rid) }
 }, 60_000)
+
+function tomb(rid) {
+  tombs.set(rid, Date.now())
+  if (tombs.size > MAX_TOMBS) tombs.delete(tombs.keys().next().value)
+}
 
 export function removeSocket(ws) {
   ws.data.run?.sockets.delete(ws)
@@ -156,12 +167,12 @@ export function handleMessage(ws, msg) {
   if (msg.type === 'ping') return send(ws, { type: 'pong' })
   const { rid } = msg
   if (typeof rid !== 'string' || !RID.test(rid)) return send(ws, { type: 'err', message: 'bad_rid' })
-  let r = runs.get(rid)
+  // A tombstoned rid acts as an already finished run
+  let r = runs.get(rid) || (tombs.has(rid) ? newRun(rid, 'done') : null)
   const after = Number.isInteger(msg.after) ? msg.after : -1
 
   switch (msg.type) {
-    // An unknown rid gets a finished placeholder, so a begin still in flight on another socket can't start it
-    case 'stop': return r ? stop(r) : void runs.set(rid, newRun(rid, 'done'))
+    case 'stop': return r ? stop(r) : tomb(rid)
     case 'resume': return r ? attach(r, ws, after) : send(ws, { type: 'gone' })
     case 'begin': break
     default: return send(ws, { type: 'err', message: 'bad_type' })
