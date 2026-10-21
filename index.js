@@ -32,11 +32,10 @@ Bun.serve({
   websocket: {
     // Videos ride along as base64 in every request; Bun's 16 MB default fits only a handful
     maxPayloadLength: 100 * 1024 * 1024,
+    // Anything malformed (bad JSON, null, wrong shapes) fails only that message; a throw here would kill the process
     message(ws, raw) {
-      let msg
-      try { msg = JSON.parse(String(raw)) }
-      catch { try { ws.send(JSON.stringify({ type: 'err', message: 'bad_json' })) } catch {}; return }
-      handleMessage(ws, msg)
+      try { handleMessage(ws, JSON.parse(String(raw))) }
+      catch { try { ws.send(JSON.stringify({ type: 'err', message: 'bad_message' })) } catch {} }
     },
     close: removeSocket,
   },
