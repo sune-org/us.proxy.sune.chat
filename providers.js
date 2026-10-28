@@ -222,7 +222,7 @@ export async function streamOpenAI({ apiKey, body, signal, onDelta, isRunning })
   }
 }
 
-export async function streamClaude({ apiKey, body, signal, onDelta, isRunning }) {
+export async function streamAnthropic({ apiKey, body, signal, onDelta, isRunning }) {
   const client = new Anthropic({ apiKey })
   const online = (body.model ?? '').endsWith(':online')
   const model = online ? body.model.slice(0, -7) : body.model

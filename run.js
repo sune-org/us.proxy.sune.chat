@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto'
 import { notify } from './notify.js'
-import { streamOpenRouter, streamOpenAI, streamClaude, streamGoogle } from './providers.js'
+import { streamOpenRouter, streamOpenAI, streamAnthropic, streamGoogle } from './providers.js'
 
 const BATCH_MS = 800
 const BATCH_BYTES = 3400
@@ -132,7 +132,7 @@ function sanitizeMessages(messages) {
 }
 
 async function beginStream(r, apiKey, body) {
-  const providerFn = { openai: streamOpenAI, google: streamGoogle, claude: streamClaude }[r.provider] || streamOpenRouter
+  const providerFn = { openai: streamOpenAI, google: streamGoogle, anthropic: streamAnthropic }[r.provider] || streamOpenRouter
   try {
     await providerFn({
       apiKey,
